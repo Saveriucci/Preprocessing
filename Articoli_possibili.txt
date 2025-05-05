@@ -1,0 +1,112 @@
+Fuzzy:
+	https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2021.714318/full ------> utilizza fuzzy cmeans
+	https://www.researchgate.net/profile/Shaker-Ali/publication/327838204_Early_detection_for_breast_cancer_by_using_fuzzy_logic/links/5c2465bca6fdccfc706b2164/Early-detection-for-breast-cancer-by-using-fuzzy-logic.pdf ------> definisce tutto l'algoritmo
+	
+	https://journals.uhd.edu.iq/index.php/uhdjst/article/view/691/540----> fuzzy cmeans
+	
+	immagini---> fuzzy c means---> heatmap ----> input CNN
+	
+	
+Clahe:
+	https://ieeexplore.ieee.org/abstract/document/10109585 ------> utilizzato per enhancing the image before being preprocessed by wavelet
+	
+	http://www.ijicic.org/ijicic-180616.pdf ------> sfrutta clahe per enhancing l'immagine 
+	
+	"\documentclass{article}
+	\usepackage{amsmath}
+	\usepackage{amssymb}
+
+	\begin{document}
+
+	\section*{Formulazione Matematica di CLAHE (Contrast Limited Adaptive Histogram Equalization)}
+
+	\subsection*{1. Istogramma Locale}
+
+	Dato un blocco (tile) dell'immagine, si calcola l'istogramma locale:
+
+	\[
+	h(i) = \sum_{(x,y) \in \text{tile}} \delta(g(x,y) = i)
+	\]
+
+	dove:
+	\begin{itemize}
+	  \item $h(i)$ è la frequenza del livello di intensità $i$.
+	  \item $\delta(\cdot)$ è la funzione indicatrice: $\delta(\text{vero}) = 1$, altrimenti $0$.
+	  \item $g(x,y)$ è l'intensità del pixel in $(x, y)$.
+	\end{itemize}
+
+	\subsection*{2. Clipping dell’Istogramma}
+
+	Per evitare sovra-amplificazioni, si limita l'altezza massima dell’istogramma a una soglia $T$:
+
+	\[
+	h_c(i) = \min(h(i), T)
+	\]
+
+	L'eccesso totale viene calcolato come:
+
+	\[
+	E = \sum_{i=0}^{L-1} \left[h(i) - T\right]^+
+	\qquad \text{dove } [x]^+ = \max(0, x)
+	\]
+
+	e viene redistribuito equamente:
+
+	\[
+	h_{\text{final}}(i) = h_c(i) + \frac{E}{L}
+	\]
+
+	dove $L$ è il numero di livelli di intensità (es. $256$ per immagini a 8 bit).
+
+	\subsection*{3. Funzione di Distribuzione Cumulativa (CDF)}
+
+	Si costruisce la funzione di distribuzione cumulativa normalizzata:
+
+	\[
+	\text{CDF}(i) = \frac{1}{N} \sum_{j=0}^{i} h_{\text{final}}(j)
+	\]
+
+	dove $N$ è il numero totale di pixel nella tile.
+
+	\subsection*{4. Rimappatura dei Pixel}
+
+	Ogni pixel viene rimappato con:
+
+	\[
+	g'(x,y) = \text{round}((L - 1) \cdot \text{CDF}(g(x,y)))
+	\]
+
+	\subsection*{5. Interpolazione tra le Tile}
+
+	Poiché ogni tile ha una propria trasformazione, i pixel ai bordi vengono interpolati linearmente tra le trasformazioni delle 4 tile adiacenti per evitare artefatti.
+
+	\end{document}
+	"
+	
+	https://arxiv.org/abs/2003.10822 ----> nota 8 porta ad un articolo carino e coccoloso sul clahe
+	
+
+wavelet:
+	https://www.researchgate.net/profile/Diyar-Zeebaree/publication/341977072_Wavelet_Applications_in_Medical_Images_A_Review/links/6117e2f9169a1a0103006fb3/Wavelet-Applications-in-Medical-Images-A-Review.pdf -----> c'è un pò di tutto
+	
+	https://publisher.uthm.edu.my/ojs/index.php/jscdm/article/view/7215 ----> applicazione wavelet discreta ( noi usiamo la HAAR che è discreta e la piu semplice)
+	
+	https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=60e3ec27be1f2e8326464fa20bd2df2822a26b25 ---> parla a livello matematico della wavelet ( mi è sembrato di capire che parla anche di HAAR)
+	
+	
+Resnet:
+	https://www.sciencedirect.com/science/article/pii/S1877050921000284 ----> rete neurale deep
+	
+	https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=10841547 ---> utilizza resnet (sembrano diverse) per la classifciazione del problema ( colon and lung cancer, con il dataset che abbiamo noi!)
+	
+	https://www.mdpi.com/2075-4418/14/20/2274 ----> non ho visto se parli effettivamente della resnet ma anche qui c'è il dataset scelto da noi
+	
+
+Tumore colon e polmone: 
+	 https://www.cell.com/cancer-cell/fulltext/S1535-6108(02)00053----> giusto per parlare di cancro (colon)
+	 
+	 https://jnccn.org/configurable/content/journals$002fjnccn$002f7$002f8$002farticle-p778.xml?t:ac=journals%24002fjnccn%24002f7%24002f8%24002farticle-p778.xml ----> colon
+	 
+	 https://www.cell.com/cancer-cell/fulltext/S1535-6108(02)00027-2 ----> polmone
+	 
+	 https://www.chestmed.theclinics.com/article/S0272-5231(11)00080-3/fulltext ---> polmone

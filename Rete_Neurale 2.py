@@ -87,12 +87,17 @@ def clahe_preprocessing():
 
 def wavelet_preprocessing():
     def apply_wavelet(pil_img):
-        img_np = np.array(pil_img.convert('L'))
+        img_np = np.array(pil_img.convert('L'), dtype=np.float32)
         coeffs2 = pywt.dwt2(img_np, 'haar')
         cA, _ = coeffs2
-        cA_img = Image.fromarray(cA).resize((224, 224))
+
+        # 🔧 Normalizzazione dei coefficienti
+        cA = (cA - np.min(cA)) / (np.max(cA) - np.min(cA) + 1e-6)
+
+        cA_img = Image.fromarray((cA * 255).astype(np.uint8)).resize((224, 224))
         tensor = TF.to_tensor(cA_img).expand(3, -1, -1)
         return tensor
+
     return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.Lambda(apply_wavelet),
@@ -102,32 +107,34 @@ def wavelet_preprocessing():
 def retinex_sobel_preprocessing():
     def apply_retinex_sobel(pil_img):
         img_np = np.array(pil_img.convert('RGB'))
-        img_gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        img_gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY).astype(np.float32)
         
-        # Retinex algorithm
-        retinex = np.log1p(img_gray) - np.log1p(cv2.GaussianBlur(img_gray, (5, 5), 0))
-        
-        # Sobel edge detection
+        # Retinex (log-based normalization)
+        blurred = cv2.GaussianBlur(img_gray, (5, 5), 0)
+        blurred[blurred == 0] = 1e-6  # prevenire log(0)
+        retinex = np.log1p(img_gray) - np.log1p(blurred)
+
+        # Sobel
         sobel_edges = cv2.Sobel(retinex, cv2.CV_64F, 1, 1, ksize=3)
-        sobel_edges = cv2.convertScaleAbs(sobel_edges)
-        
-        # Normalize and return as tensor
-        sobel_edges = sobel_edges.astype(np.float32) / 255.0
-        return torch.tensor(sobel_edges).unsqueeze(0).repeat(3, 1, 1)
+        sobel_edges = np.abs(sobel_edges)
+        sobel_edges = (sobel_edges - sobel_edges.min()) / (sobel_edges.max() - sobel_edges.min() + 1e-6)
+
+        return torch.tensor(sobel_edges, dtype=torch.float32).unsqueeze(0).repeat(3, 1, 1)
 
     return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.Lambda(apply_retinex_sobel),
-        transforms.Normalize([0.5]*3, [0.5]*3)
+        transforms.Normalize([0.5]*3, [0.5]*3)  # ← Commenta per evitare immagine scura
     ])
 
+
 # === SCELTA PREPROCESSAMENTO ===
-use_standard = False
+use_standard = True
 use_augmentation = False
 use_fuzzy = False
 use_clahe = False
 use_wavelet = False
-use_retinex_sobel = True
+use_retinex_sobel = False
 
 if use_standard:
     transform = standard_preprocessing()
@@ -146,14 +153,14 @@ else:
 
 # === DATASET E DATALOADER ===
 class CustomImageDataset(Dataset):
-    def _init_(self, df, transform=None):
+    def __init__(self, df, transform=None):
         self.df = df
         self.transform = transform
 
-    def _len_(self):
+    def __len__(self):
         return len(self.df)
 
-    def _getitem_(self, idx):
+    def __getitem__(self, idx):
         path = self.df.iloc[idx]['image_path']
         label = self.df.iloc[idx]['label']
         try:
@@ -168,8 +175,8 @@ class CustomImageDataset(Dataset):
 # === DIVISIONE DEL DATASET ===
 from sklearn.model_selection import train_test_split
 
-train_df, test_df = train_test_split(df, test_size=0.2, stratify=df['label'])
-val_df, test_df = train_test_split(test_df, test_size=0.5, stratify=test_df['label'])
+train_df, test_df = train_test_split(df, test_size=0.2, stratify=df['label'], random_state = 42)
+val_df, test_df = train_test_split(test_df, test_size=0.5, stratify=test_df['label'], random_state = 42)
 
 train_dataset = CustomImageDataset(train_df, transform=transform)
 val_dataset = CustomImageDataset(val_df, transform=transform)
@@ -292,27 +299,31 @@ def evaluate_model(model, test_loader):
     return accuracy
 
 # === ESECUZIONE ===
-train_loss, train_acc, val_loss, val_acc = train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=10)
-test_accuracy = evaluate_model(model, test_loader)
-
-# === GRAFICI FINALIZZATI ===
-# Accuracy durante l'addestramento e validazione
-plt.figure(figsize=(10,5))
-plt.subplot(1, 2, 1)
-plt.plot(range(1, len(train_acc) + 1), train_acc, label="Train Accuracy")
-plt.plot(range(1, len(val_acc) + 1), val_acc, label="Validation Accuracy")
-plt.xlabel("Epochs")
-plt.ylabel("Accuracy (%)")
-plt.legend()
-plt.title("Accuracy during Training and Validation")
-plt.savefig("accuracy_during_training.png")
-
-# Loss durante l'addestramento e validazione
-plt.subplot(1, 2, 2)
-plt.plot(range(1, len(train_loss) + 1), train_loss, label="Train Loss")
-plt.plot(range(1, len(val_loss) + 1), val_loss, label="Validation Loss")
-plt.xlabel("Epochs")
-plt.ylabel("Loss")
-plt.legend()
-plt.title("Loss during Training and Validation")
-plt.savefig("loss_during_training.png")
+def main():
+    train_loss, train_acc, val_loss, val_acc = train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=10)
+    test_accuracy = evaluate_model(model, test_loader)
+    
+    # === GRAFICI FINALIZZATI ===
+    # Accuracy durante l'addestramento e validazione
+    plt.figure(figsize=(10,5))
+    plt.subplot(1, 2, 1)
+    plt.plot(range(1, len(train_acc) + 1), train_acc, label="Train Accuracy")
+    plt.plot(range(1, len(val_acc) + 1), val_acc, label="Validation Accuracy")
+    plt.xlabel("Epochs")
+    plt.ylabel("Accuracy (%)")
+    plt.legend()
+    plt.title("Accuracy during Training and Validation")
+    plt.savefig("accuracy_during_training.png")
+    
+    # Loss durante l'addestramento e validazione
+    plt.subplot(1, 2, 2)
+    plt.plot(range(1, len(train_loss) + 1), train_loss, label="Train Loss")
+    plt.plot(range(1, len(val_loss) + 1), val_loss, label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Loss during Training and Validation")
+    plt.savefig("loss_during_training.png")
+    
+if __name__ == "__main__":
+    main()

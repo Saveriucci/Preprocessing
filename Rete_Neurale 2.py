@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
@@ -22,19 +23,20 @@ from sklearn.preprocessing import StandardScaler
 # === PREPROCESSAMENTI ===
 def standard_preprocessing():
     return transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((224, 224)),  # Ridimensiona a input compatibile con modelli pre-addestrati
+        transforms.Grayscale(num_output_channels=1),  # Converte in scala di grigi
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        transforms.Normalize([0.5], [0.5])  # Normalizzazione semplice per immagini grayscale
     ])
 
 def augmentation_preprocessing():
     return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+        transforms.RandomRotation(10),  # Piccole rotazioni per aumentare la varietà dei dati
+        transforms.Grayscale(num_output_channels=1),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        transforms.Normalize([0.5], [0.5])
     ])
 
 def apply_fuzzy_cmeans(tensor_img):
@@ -56,22 +58,20 @@ def fuzzy_preprocessing():
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-def apply_clahe(tensor_img):
-    np_img = tensor_img.permute(1, 2, 0).numpy()
-    np_img = (np_img * 255).astype(np.uint8)
-    gray_img = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
+def apply_clahe(pil_img):
+    img_np = np.array(pil_img.convert('L'))  # Converti a scala di grigi
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    clahe_img = clahe.apply(gray_img)
-    clahe_img = clahe_img.astype(np.float32) / 255.0
-    return torch.tensor(clahe_img).unsqueeze(0).repeat(3, 1, 1)
+    enhanced = clahe.apply(img_np)
+    normalized = enhanced.astype(np.float32) / 255.0  # Scala 0-1
+    return torch.tensor(normalized).unsqueeze(0)  # [1, H, W]
+
 
 def clahe_preprocessing():
-        return transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Lambda(apply_clahe),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    return transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.Lambda(apply_clahe)
     ])
+
 def apply_wavelet(pil_img):
     img_np = np.array(pil_img.convert('L'), dtype=np.float32)
     coeffs2 = pywt.dwt2(img_np, 'haar')
@@ -90,79 +90,66 @@ def wavelet_preprocessing():
         transforms.Lambda(apply_wavelet),
         transforms.Normalize([0.5]*3, [0.5]*3)
     ])
+
 def apply_retinex_sobel(pil_img):
-    img_np = np.array(pil_img.convert('RGB'))
-    img_gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    
-    # Retinex (log-based normalization)
-    blurred = cv2.GaussianBlur(img_gray, (5, 5), 0)
-    blurred[blurred == 0] = 1e-6  # prevenire log(0)
-    retinex = np.log1p(img_gray) - np.log1p(blurred)
+    img_np = np.array(pil_img.convert('L')).astype(np.float32)
+    blurred = cv2.GaussianBlur(img_np, (5, 5), 0)
+    blurred[blurred == 0] = 1e-6  # Previene log(0)
+    retinex = np.log1p(img_np) - np.log1p(blurred)  # Retinex
 
-    # Sobel
-    sobel_edges = cv2.Sobel(retinex, cv2.CV_64F, 1, 1, ksize=3)
-    sobel_edges = np.abs(sobel_edges)
-    sobel_edges = (sobel_edges - sobel_edges.min()) / (sobel_edges.max() - sobel_edges.min() + 1e-6)
+    # Applica filtro di Sobel
+    sobel = cv2.Sobel(retinex, cv2.CV_64F, 1, 1, ksize=3)
+    sobel = np.abs(sobel)
+    sobel = (sobel - sobel.min()) / (sobel.max() - sobel.min() + 1e-6)
 
-    return torch.tensor(sobel_edges, dtype=torch.float32).unsqueeze(0).repeat(3, 1, 1)
+    return torch.tensor(sobel, dtype=torch.float32).unsqueeze(0)
 
 def retinex_sobel_preprocessing():
     return transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.Lambda(apply_retinex_sobel),
-        transforms.Normalize([0.5]*3, [0.5]*3)  # ← Commenta per evitare immagine scura
+        transforms.Lambda(apply_retinex_sobel)
     ])
 
-def apply_homomorphic_highpass(pil_img):
+def apply_homomorphic(pil_img):
     img_np = np.array(pil_img.convert('L'), dtype=np.float32) / 255.0
-    
-    # --- Homomorphic Filter ---
-    # Log-transform
+
+    # Filtro omomorfico: log, FFT, filtro, iFFT
     img_log = np.log1p(img_np)
-    
-    # FFT
     img_fft = np.fft.fft2(img_log)
     img_fft_shift = np.fft.fftshift(img_fft)
-    
+
     rows, cols = img_np.shape
     crow, ccol = rows // 2, cols // 2
-    
-    # Create Gaussian high pass filter mask
-    D0 = 30  # cutoff frequency, puoi regolare
+    D0 = 30  # Frequenza di taglio
+
+    # Maschera high-pass gaussiana
     H = np.ones((rows, cols))
     for u in range(rows):
         for v in range(cols):
-            D = np.sqrt((u - crow)**2 + (v - ccol)**2)
-            H[u, v] = 1 - np.exp(-(D**2) / (2 * (D0**2)))
-    
-    # Apply filter in frequency domain
+            D = np.sqrt((u - crow) ** 2 + (v - ccol) ** 2)
+            H[u, v] = 1 - np.exp(-(D ** 2) / (2 * (D0 ** 2)))
+
     img_fft_filt = img_fft_shift * H
-    
-    # Inverse FFT
-    img_ifft_shift = np.fft.ifftshift(img_fft_filt)
-    img_filtered_log = np.fft.ifft2(img_ifft_shift)
-    img_filtered_log = np.real(img_filtered_log)
-    
-    # Exp to invert log transform and normalize
-    img_filtered = np.expm1(img_filtered_log)
+    img_ifft = np.fft.ifft2(np.fft.ifftshift(img_fft_filt))
+    img_filtered = np.real(np.expm1(img_ifft))
     img_filtered = np.clip(img_filtered, 0, 1)
-    
-    # --- High Pass Filter (Sobel) ---
+
+    # Filtro Sobel per evidenziare i bordi
     sobel_x = cv2.Sobel(img_filtered, cv2.CV_64F, 1, 0, ksize=3)
     sobel_y = cv2.Sobel(img_filtered, cv2.CV_64F, 0, 1, ksize=3)
     highpass = np.sqrt(sobel_x**2 + sobel_y**2)
-    highpass = (highpass - highpass.min()) / (np.ptp(highpass) + 1e-6)
-    
-    # Convert to tensor and repeat to 3 channels
-    tensor_img = torch.tensor(highpass, dtype=torch.float32).unsqueeze(0).repeat(3,1,1)
-    
-    return tensor_img
+    highpass = (highpass * 255).astype(np.uint8)
+
+    # Migliora contrasto con CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    highpass_clahe = clahe.apply(highpass).astype(np.float32) / 255.0
+
+    return torch.tensor(highpass_clahe).unsqueeze(0)
 
 def homomorphic_highpass_preprocessing():
-        return transforms.Compose([
+    return transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.Lambda(apply_homomorphic_highpass),
-        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+        transforms.Lambda(apply_homomorphic)
     ])
 
 
@@ -178,16 +165,23 @@ class CustomImageDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        path = self.df.iloc[idx]['image_path']
+        img_path = self.df.iloc[idx]['image_path']
         label = self.df.iloc[idx]['label']
-        try:
-            img = Image.open(path).convert("RGB")
-            if self.transform:
-                img = self.transform(img)
-            return img, label
-        except Exception as e:
-            print(f"Errore caricando {path}: {e}")
-            return torch.zeros(3, 224, 224), 0
+        
+        img_pil = Image.open(img_path).convert("RGB")  # già in RGB, ma se no vedi sotto
+        
+        # Applica la trasformazione
+        if self.transform:
+            img_tensor = self.transform(img_pil)
+            
+            # Qui il controllo e repeat se canale == 1
+            if img_tensor.shape[0] == 1:
+                img_tensor = img_tensor.repeat(3, 1, 1)
+        else:
+            # fallback se nessuna trasformazione
+            img_tensor = transforms.ToTensor()(img_pil)
+        
+        return img_tensor, label
 
 
 # Disabilita ReLU inplace in tutto il modello
@@ -521,13 +515,13 @@ def main():
     df["label"] = df["label"].map(label_map)
     
     preprocessamenti ={
-        "Standar": standard_preprocessing(),
+        "Standard": standard_preprocessing(),
         "Augmentation": augmentation_preprocessing(),
         "CLAHE": clahe_preprocessing(),
-        "Wavelet": wavelet_preprocessing(),
+        #"Wavelet": wavelet_preprocessing(),
         "RetinexSoobel": retinex_sobel_preprocessing(),
         "HomomorphicHghPass": homomorphic_highpass_preprocessing(),
-        "Fuzzy": fuzzy_preprocessing()
+        #"Fuzzy": fuzzy_preprocessing()
         }
     
     # === SPLIT === #
